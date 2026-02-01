@@ -495,7 +495,7 @@ export default function DesertHaze() {
                 <div className="splash-title">
                     CLICK TO INITIALIZE [OPERATION DESERT HAZE]
                 </div>
-                <div className="splash-subtitle">PHONK // WARCORE // VISUALIZER</div>
+                <div className="splash-subtitle">WARCORE VISUALIZER</div>
             </div>
 
             {/* Video container */}
