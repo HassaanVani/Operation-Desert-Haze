@@ -1,0 +1,276 @@
+/*
+ * OPERATION DESERT HAZE — Global Styles
+ * Aesthetic: Stealth / Tactical
+ * Palette: Pure Black, White Text, Translucent Overlays
+ * Geometry: Sharp edges, no border-radius
+ * Typography: Monospace / Terminal
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;700&display=swap');
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --color-bg: #000000;
+  --color-text: #ffffff;
+  --color-text-dim: rgba(255, 255, 255, 0.6);
+  --color-overlay: rgba(0, 0, 0, 0.5);
+  --color-border: rgba(255, 255, 255, 0.2);
+  --font-mono: 'Roboto Mono', 'Courier New', monospace;
+}
+
+html,
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  height: 100%;
+  width: 100%;
+  cursor: crosshair;
+}
+
+/* ========================================
+   SPLASH SCREEN
+   ======================================== */
+
+.splash-screen {
+  position: fixed;
+  inset: 0;
+  background: var(--color-bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  cursor: pointer;
+  transition: opacity 0.5s ease-out;
+}
+
+.splash-screen.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.splash-title {
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+  color: var(--color-text);
+  text-align: center;
+  padding: 1rem 2rem;
+  border: 1px solid var(--color-border);
+  transition: border-color 0.2s ease;
+}
+
+.splash-title:hover {
+  border-color: var(--color-text);
+}
+
+.splash-subtitle {
+  font-size: 0.625rem;
+  color: var(--color-text-dim);
+  margin-top: 1rem;
+  letter-spacing: 0.15em;
+}
+
+/* ========================================
+   TWIN-DECK VIDEO ENGINE
+   ======================================== */
+
+.video-container {
+  position: fixed;
+  inset: 0;
+  background: var(--color-bg);
+  overflow: hidden;
+  /* Clip scaled videos */
+}
+
+.video-deck {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--color-bg);
+  transition: opacity 0.15s ease-in-out;
+}
+
+.video-deck iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  pointer-events: none;
+}
+
+.video-deck.hidden {
+  opacity: 0;
+}
+
+.video-deck.visible {
+  opacity: 1;
+}
+
+/* ========================================
+   STATUS OVERLAY
+   ======================================== */
+
+.status-overlay {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  background: var(--color-overlay);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  border: 1px solid var(--color-border);
+  padding: 1rem 1.25rem;
+  font-size: 0.6875rem;
+  z-index: 100;
+  cursor: grab;
+  user-select: none;
+  min-width: 220px;
+  transition: min-width 0.2s ease;
+}
+
+.status-overlay.collapsed {
+  min-width: auto;
+}
+
+.status-overlay:active {
+  cursor: grabbing;
+}
+
+.status-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.status-overlay:not(.collapsed) .status-header {
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.status-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.status-label {
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  font-size: 0.5625rem;
+  color: var(--color-text-dim);
+}
+
+.collapse-btn {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  width: 18px;
+  height: 18px;
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+  transition: border-color 0.2s ease;
+}
+
+.collapse-btn:hover {
+  border-color: var(--color-text);
+}
+
+.rec-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.rec-dot {
+  width: 6px;
+  height: 6px;
+  background: #ff0000;
+  animation: pulse-rec 1s ease-in-out infinite;
+}
+
+.rec-dot.paused {
+  background: #555;
+  animation: none;
+}
+
+@keyframes pulse-rec {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.status-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.375rem;
+}
+
+.status-row:last-child {
+  margin-bottom: 0;
+}
+
+.status-key {
+  color: var(--color-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.5625rem;
+}
+
+.status-value {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ========================================
+   AUDIO VISUALIZER BAR
+   ======================================== */
+
+.visualizer-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+  margin-top: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.visualizer-segment {
+  width: 3px;
+  background: var(--color-text);
+  transition: height 0.1s ease;
+}
+
+/* ========================================
+   HIDING CURSORS FOR IFRAMES
+   ======================================== */
+
+.video-deck iframe {
+  pointer-events: none;
+}
