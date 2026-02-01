@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
     title: "Operation Desert Haze",
-    description: "A Phonk / Warcore visualizer syncing military footage to slowed Macarena beats",
+    description: "A Warcore visualizer syncing military footage to slowed Macarena beats",
 };
 
 export default function RootLayout({

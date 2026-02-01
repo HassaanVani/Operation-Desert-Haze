@@ -32,6 +32,7 @@ interface YouTubePlayer {
 
 interface YouTubeEvent {
     target: YouTubePlayer;
+    data: number;
 }
 
 declare global {
@@ -44,21 +45,25 @@ declare global {
                     playerVars: Record<string, string | number>;
                     events: {
                         onReady: (event: YouTubeEvent) => void;
+                        onStateChange: (event: YouTubeEvent) => void;
                     };
                 }
             ) => YouTubePlayer;
             PlayerState: {
+                UNSTARTED: number;
+                ENDED: number;
                 PLAYING: number;
                 PAUSED: number;
-                ENDED: number;
+                BUFFERING: number;
+                CUED: number;
             };
         };
         onYouTubeIframeAPIReady: () => void;
     }
 }
 
-// Deck identifier
-type DeckId = "A" | "B" | "C";
+// 4-Deck identifier
+type DeckId = "A" | "B" | "C" | "D";
 
 export default function DesertHaze() {
     // State
@@ -72,39 +77,34 @@ export default function DesertHaze() {
     const [overlayCollapsed, setOverlayCollapsed] = useState(false);
     const [paused, setPaused] = useState(false);
 
-    // Deck Management State: A -> B -> C rotation
+    // Deck Management State: A -> B -> C -> D rotation
     const [activeDeck, setActiveDeck] = useState<DeckId>("A");
 
     // Decks are:
     // ACTIVE: Visible, playing
-    // BUFFEREd: Hidden, loaded, paused, ready to cut to
-    // LOADING: Hidden, actively loading next video
+    // READY (B/C): Hidden, loaded, paused, ready to cut to
+    // LOADING (D): Hidden, actively loading next video, warming up
+
+    const deckOrderRef = useRef<DeckId[]>(["A", "B", "C", "D"]);
+
+    // Helper: calculate rotation position
+    const getNextDeck = (current: DeckId) => deckOrderRef.current[(deckOrderRef.current.indexOf(current) + 1) % 4];
+    const getLoadingDeck = (current: DeckId) => deckOrderRef.current[(deckOrderRef.current.indexOf(current) + 3) % 4];
 
     // Refs
     const audioRef = useRef<HTMLAudioElement>(null);
     const beatMapRef = useRef<number[]>([]);
     const currentBeatIndexRef = useRef(0);
     const playersRef = useRef<Record<DeckId, YouTubePlayer | null>>({
-        A: null, B: null, C: null
+        A: null, B: null, C: null, D: null
     });
     const ytApiReadyRef = useRef(false);
     const overlayRef = useRef<HTMLDivElement>(null);
     const dragStateRef = useRef({ isDragging: false, startX: 0, startY: 0 });
 
-    // Track rotation order: A -> B -> C -> A ...
-    const deckOrderRef = useRef<DeckId[]>(["A", "B", "C"]);
-
-    // Calculate next deck in rotation
-    const getNextDeck = (current: DeckId): DeckId => {
-        const idx = deckOrderRef.current.indexOf(current);
-        return deckOrderRef.current[(idx + 1) % 3];
-    };
-
-    // Calculate deck after next (the one that should start loading)
-    const getLoadingDeck = (current: DeckId): DeckId => {
-        const idx = deckOrderRef.current.indexOf(current);
-        return deckOrderRef.current[(idx + 2) % 3];
-    };
+    // State tracking for "Warmup" logic
+    // We need to track which player is currently "warming up" so onStateChange knows what to do
+    const warmingUpRef = useRef<Record<string, boolean>>({});
 
     // Load beat map
     useEffect(() => {
@@ -182,7 +182,7 @@ export default function DesertHaze() {
                         fs: 0,
                         modestbranding: 1,
                         rel: 0,
-                        showinfo: 0, // Note: deprecated by YouTube but still good to try
+                        showinfo: 0,
                         mute: 1,
                         playsinline: 1,
                         loop: 1,
@@ -194,39 +194,98 @@ export default function DesertHaze() {
                             playersRef.current[deckId] = event.target;
                             onReady(event.target);
                         },
+                        onStateChange: (event: YouTubeEvent) => {
+                            handlePlayerStateChange(deckId, event);
+                        }
                     },
                 });
             };
 
             checkAndCreate();
         },
+        // eslint-disable-next-line react-hooks/exhaustive-deps
         []
     );
 
-    // Cue a specific video on a specific player
-    // This is the "LOADING" phase
+    // Dynamic Player State Handler
+    // This is the core of the "Pre-Buffer / Warmup" strategy
+    const handlePlayerStateChange = (deckId: DeckId, event: YouTubeEvent) => {
+        const player = event.target;
+        const state = event.data;
+
+        // CHECK IF THIS DECK IS IN WARMUP MODE
+        // We use a custom property or ref to track if this deck is trying to buffer
+        if (warmingUpRef.current[deckId]) {
+            if (state === window.YT.PlayerState.PLAYING) {
+                // It has successfully started playing! 
+                // That means pixels are ready.
+                // Immediately PAUSE it and mark ready.
+                player.pauseVideo();
+                warmingUpRef.current[deckId] = false; // Warmup complete
+                console.log(`[DECK-${deckId}] WARMUP COMPLETE (Buffered)`);
+            }
+        }
+    };
+
+    // Cue a specific video with "Warmup" logic
     const loadVideoOnDeck = useCallback(
         (deckId: DeckId, videoId: string) => {
             const player = playersRef.current[deckId];
             if (!player) return;
 
             try {
-                // We guess a random start time (0-180s) immediately for speed
-                // Or if we know the video usage, we can be smarter.
-                // Since we don't have metadata yet, we assume 3 minutes safe range
-                // or just start at 3s and seek later if needed.
-                // Ideally, we loadVideoById with a startSeconds param for INSTANT seek.
-                const randomStart = Math.floor(Math.random() * 120) + SKIP_SECONDS; // 2 min window safest
+                // 1. Mark as warming up
+                warmingUpRef.current[deckId] = true;
 
-                player.loadVideoById({
-                    videoId: videoId,
-                    startSeconds: randomStart
-                });
+                // 2. Load video at 0 (temporarily) just to get metadata
+                // actually, sticking to startSeconds=0 is safest if we don't know duration.
+                // WE WILL LOAD, PLAY, WAIT FOR DURATION, THEN SEEK.
+
+                // Strategy: Load at 0.
+                // Player will start PLAYING (muted).
+                // We catch that state change.
+                // We check duration.
+                // We seek to random.
+                // We wait for it to PLAY again.
+                // Then we PAUSE.
+
+                // Simplified Strategy:
+                // Just load at a safe guess (e.g. 10s). If video is shorter than 10s... tough luck (most are longer).
+                // Or better: Load without startSeconds.
+
+                player.loadVideoById({ videoId });
                 player.mute();
-                // Pause immediately after loading to buffer? 
-                // Actually for seamless playback often better to let it play muted
-                // but since it's hidden, playing is fine.
-                // We'll let it play (it's muted and hidden).
+                // We trust onStateChange to handle the "Pause when playing" logic
+
+                // BUT we also need to Seek to random time.
+                // We can't do that until we know duration.
+                // So... let's hook into the State Change more deeply.
+
+                // New Logic for handlePlayerStateChange needs to be smarter.
+                // Let's implement a 'phase' system for warmup?
+                // Too complex for React state... reusing the ref.
+
+                // Let's rely on a simpler trick:
+                // Check duration immediately? Usually 0.
+                // Let's wait 500ms then check duration?
+
+                setTimeout(() => {
+                    const duration = player.getDuration();
+                    if (duration > 0) {
+                        const safeStart = SKIP_SECONDS;
+                        const safeEnd = Math.max(safeStart + 1, duration - SKIP_SECONDS);
+                        const randomStart = safeStart + Math.random() * (safeEnd - safeStart - 5);
+
+                        // Seek now
+                        player.seekTo(randomStart, true);
+                        // Ensure it plays to fill buffer
+                        player.playVideo();
+                    } else {
+                        // Fallback: just play from 0
+                        player.playVideo();
+                    }
+                }, 800); // 800ms delay to allow metadata load
+
             } catch (err) {
                 console.error(`[DECK-${deckId}] Error loading video:`, err);
             }
@@ -242,7 +301,7 @@ export default function DesertHaze() {
         let animationId: number;
 
         const checkBeat = () => {
-            if (paused) return; // double check
+            if (paused) return;
 
             const currentTime = audio.currentTime;
             const beats = beatMapRef.current;
@@ -250,31 +309,43 @@ export default function DesertHaze() {
 
             // Check if we've hit the next beat
             if (currentIndex < beats.length && currentTime >= beats[currentIndex]) {
-                // 1. Determine rotation:
-                // Current Active -> becomes Loading (recycles)
-                // Current Buffered -> becomes Active (visible)
-                // Current Loading -> becomes Buffered (getting ready)
-
-                // My logic in state is simply "activeDeck".
-                // So if Active is A...
-                // Next Active should be B (which was buffered).
-                // C (which was loading) becomes the new Buffered.
-                // A (old active) becomes the new Loading.
+                // Rotation: A -> B -> C -> D -> A
 
                 const nextActive = getNextDeck(activeDeck);
-                const deckToReload = activeDeck; // The one we just finished using
+                const deckToReload = activeDeck; // The one we just stopped using
 
-                // SWITCH VISIBLE DECK
+                // 1. ACTIVATE NEXT DECK
                 setActiveDeck(nextActive);
 
-                // Get ID for display
-                // Note: We don't easily know the video ID running on the iframe without querying it,
-                // but we can track it or just query it (async).
-                // Or just pick a new random ID for the deck we are about to reload.
-                const newVideoId = getRandomVideoId();
-                setCurrentVideoId(newVideoId); // This is technically "next" video ID shown on overlay
+                // If the next deck was properly warmed up, it's sitting PAUSED.
+                // We command it to PLAY.
+                const nextPlayer = playersRef.current[nextActive];
+                if (nextPlayer) {
+                    nextPlayer.playVideo();
+                }
 
-                // RELOAD THE OLD DECK (Prepare for 2 turns from now)
+                // 2. STOP OLD DECK
+                // It was playing. Now we hide it.
+                // We should also Pause it to save resources? 
+                // Or just let it be reloaded. Loading overrides it anyway.
+
+                // 3. START LOADING THE "D" DECK (Future buffer)
+                // In a 4-deck system (A,B,C,D), if we just moved to B (active),
+                // C is Ready, D is Ready... wait.
+                // A is now "Old". It becomes the new "Loading" for slot D's position?
+
+                // Let's trace:
+                // cycle 0: Active=A. B=Ready. C=Ready. D=Ready.
+                // cycle 1: Active=B. A becomes "Recycling". C=Ready. D=Ready.
+                // We need to reload A to be ready for when D finishes.
+
+                // Ideally, we keep 2 decks "Ready" if possible.
+                // With 4 decks: 1 Active, 2 Ready, 1 Loading.
+
+                const newVideoId = getRandomVideoId();
+                setCurrentVideoId(newVideoId); // Update UI
+
+                // Start the heavy lifting on the old deck
                 loadVideoOnDeck(deckToReload, newVideoId);
 
                 // Move to next beat
@@ -315,7 +386,8 @@ export default function DesertHaze() {
         if (paused) {
             // RESUME
             audioRef.current.play();
-            Object.values(playersRef.current).forEach(p => p?.playVideo());
+            // Resume only the active player
+            playersRef.current[activeDeck]?.playVideo();
             setPaused(false);
         } else {
             // STOP/PAUSE
@@ -323,7 +395,7 @@ export default function DesertHaze() {
             Object.values(playersRef.current).forEach(p => p?.pauseVideo());
             setPaused(true);
         }
-    }, [paused]);
+    }, [paused, activeDeck]);
 
     // Initialize system on click
     const handleInitialize = () => {
@@ -340,30 +412,39 @@ export default function DesertHaze() {
             });
         }
 
-        // Initialize 3 Decks
-        // A: Active (starts playing)
-        // B: Buffered (loads video, ready to go)
-        // C: Loading (loads 3rd video)
-
-        // We'll init players, and in their OnReady, we'll load content
+        // Initialize 4 Decks
         const initDeck = (id: DeckId) => {
             const vid = getRandomVideoId();
             // Initial load
             initPlayer(`deck-${id}`, id, vid, (player) => {
-                // For initial state:
-                // A plays immediately
-                // B loads and pauses (or plays muted hidden)
-                // C loads and pauses
+                // Initial Warmup
+                // Same logic as loadVideoOnDeck essentially
+                warmingUpRef.current[id] = true;
 
-                const randomStart = Math.floor(Math.random() * 60) + 10;
-                player.seekTo(randomStart, true);
-                player.playVideo();
+                setTimeout(() => {
+                    const duration = player.getDuration();
+                    const safeStart = SKIP_SECONDS;
+                    const safeEnd = duration > 0 ? Math.max(safeStart + 1, duration - SKIP_SECONDS) : 60;
+                    const randomStart = safeStart + Math.random() * (safeEnd - safeStart - 5);
 
-                if (id === "A") setCurrentVideoId(vid);
+                    player.seekTo(randomStart, true);
+                    player.playVideo();
+
+                    // If it's Deck A, don't pause it (handled by state change listener logic? 
+                    // actually our state listener pauses EVERYTHING that warms up.
+                    // We need to override for Deck A initial launch.
+
+                    if (id === "A") {
+                        // Hack: clear warmup flag so it doesn't auto-pause
+                        warmingUpRef.current["A"] = false;
+                        setCurrentVideoId(vid);
+                    }
+
+                }, 1000);
             });
         };
 
-        ["A", "B", "C"].forEach(id => initDeck(id as DeckId));
+        (["A", "B", "C", "D"] as DeckId[]).forEach(id => initDeck(id));
     };
 
     // Draggable overlay
@@ -419,18 +500,12 @@ export default function DesertHaze() {
 
             {/* Video container */}
             <div className="video-container">
-                {/* 
-                   We render 3 decks. 
-                   Only the 'activeDeck' is visible (opacity 1, z-index 1).
-                   Others are hidden (opacity 0, z-index 0).
-                */}
-                {(["A", "B", "C"] as DeckId[]).map((deckId) => (
+                {(["A", "B", "C", "D"] as DeckId[]).map((deckId) => (
                     <div
                         key={deckId}
                         className={`video-deck ${activeDeck === deckId ? "visible" : "hidden"}`}
                         style={{
                             zIndex: activeDeck === deckId ? 1 : 0,
-                            // Scale up to hide youtube titles/controls at top/bottom
                             transform: "scale(1.2)"
                         }}
                     >
