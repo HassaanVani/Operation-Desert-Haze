@@ -299,11 +299,22 @@ export default function DesertHaze() {
 
         const audio = audioRef.current;
         let animationId: number;
+        let lastTime = 0;
 
         const checkBeat = () => {
             if (paused) return;
 
             const currentTime = audio.currentTime;
+
+            // Detect Loop (Time dropped significantly)
+            // If we went from e.g. 400s to 1s, we looped.
+            if (lastTime > 10 && currentTime < 5) {
+                console.log("[SYNC] Loop detected - Resetting beat index");
+                currentBeatIndexRef.current = 0;
+                // Also optionally reset visualizer or other states if needed
+            }
+            lastTime = currentTime;
+
             const beats = beatMapRef.current;
             const currentIndex = currentBeatIndexRef.current;
 
@@ -364,18 +375,10 @@ export default function DesertHaze() {
         };
 
         animationId = requestAnimationFrame(checkBeat);
-
-        // Handle audio loop reset
-        const handleLoop = () => {
-            currentBeatIndexRef.current = 0;
-        };
-
-        audio.addEventListener("ended", handleLoop);
         audio.loop = true;
 
         return () => {
             cancelAnimationFrame(animationId);
-            audio.removeEventListener("ended", handleLoop);
         };
     }, [initialized, activeDeck, paused, getRandomVideoId, loadVideoOnDeck]);
 
